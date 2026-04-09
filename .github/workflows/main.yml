@@ -2,16 +2,14 @@ name: V.O.I.D Parser Auto-Update
 
 on:
   schedule:
-    # Запуск каждые 55 минут
     - cron: '*/55 * * * *'
-  workflow_dispatch: # Кнопка для ручного запуска
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     permissions:
-      contents: write # Даем права на запись изменений в репозиторий
+      contents: write
 
     steps:
       - name: Checkout code
@@ -25,25 +23,25 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Устанавливаем всё, что было в твоих импортах + lxml для парсинга
-          pip install requests aiohttp aiofiles lxml
+          # Устанавливаем всё, что нужно твоему парсеру (926 строк - это серьезно)
+          pip install requests aiohttp aiofiles lxml beautifulsoup4
 
       - name: Install Xray Core
         run: |
-          # Авто-подбор последней версии Xray под Linux 64-bit
           LATEST_URL=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep "browser_download_url.*Xray-linux-64.zip" | cut -d '"' -f 4)
           curl -L "$LATEST_URL" -o xray.zip
           unzip -o xray.zip
           chmod +x xray
-          # Закидываем в PATH, чтобы python видел команду 'xray'
-          sudo mv xray /usr/local/bin/
-          xray -version # Проверка, что встало ровно
+          # Копируем и в систему, и в корень репо для надежности
+          sudo cp xray /usr/local/bin/
+          cp xray ./xray 
 
       - name: Run V.O.I.D Parser
         run: |
-          # Создаем папку для конфигов, если скрипт её ожидает
+          # Создаем файлы, если их вдруг нет в репо, чтобы не было Code 3
+          touch sources.txt
           mkdir -p configs
-          # Запуск твоего переименованного файла
+          # ЗАПУСК (убедись, что файл в репо называется parser.py)
           python parser.py
 
       - name: Commit and push changes
@@ -51,6 +49,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .
-          # Коммитим только если файлы реально изменились, чтобы не плодить пустые ошибки
-          git commit -m "🌑 VOID: Эфир обновлен $(date +'%Y-%m-%d %H:%M')" || echo "Изменений не обнаружено"
+          git commit -m "🌑 VOID: Эфир обновлен $(date +'%Y-%m-%d %H:%M')" || echo "No changes"
           git push
