@@ -26,10 +26,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install requests
+          pip install aiofiles
+          pip install aiohttp
           # Добавь сюда другие библиотеки, если они нужны твоему парсеру
 
       - name: Run parser
-        run: python your_script_name.py  # Замени на имя своего файла
+        run: python parser.py  # Замени на имя своего файла
 
       - name: Commit and push changes
         run: |
