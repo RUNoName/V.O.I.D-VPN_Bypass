@@ -25,7 +25,7 @@ print(f"📂 Текущая директория: {os.getcwd()}")
 print(f"🐍 Python версия: {sys.version}")
 
 # ========= ФАЙЛЫ =========
-SOURCES_FILE = "Источники.txt"
+SOURCES_FILE = "sources.txt"
 OUTPUT_FILE = "url.txt"
 CLEAN_FILE = "url_clean.txt"
 FILTERED_FILE = "url_filtered.txt"
