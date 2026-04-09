@@ -37,9 +37,11 @@ jobs:
 
       - name: Run V.O.I.D Parser
         run: |
-          touch sources.txt processed.json
+          # Создаем папку, если её нет, чтобы Python не вылетел с ошибкой
           mkdir -p configs
-          # Запускаем и смотрим, что внутри
+          touch sources.txt processed.json
+          
+          # Запуск
           python parser.py
 
       - name: Commit and push changes
