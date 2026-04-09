@@ -977,6 +977,6 @@ async def run_forever():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run_forever())
+        asyncio.run(main_cycle())
     except KeyboardInterrupt:
         print("\n👋 Программа остановлена")
