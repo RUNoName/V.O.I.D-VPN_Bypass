@@ -28,23 +28,18 @@ jobs:
 
       - name: Install Xray Core
         run: |
-          # Качаем напрямую стабильную версию 1.8.4 (или любую свежую)
           curl -L "https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip" -o xray.zip
           unzip -o xray.zip
           chmod +x xray
-          # Проверяем, что файл реально есть
-          ls -l xray
-          # Копируем в систему и в папку со скриптом
-          sudo cp xray /usr/local/bin/
-          cp xray ./xray
-          echo "✅ Xray установлен и готов к бою"
+          # Копируем в систему, а в текущей папке он и так уже лежит
+          sudo cp xray /usr/local/bin/xray || true
+          echo "✅ Xray готов к работе"
 
       - name: Run V.O.I.D Parser
         run: |
-          # Создаем файлы, если их вдруг нет в репо, чтобы не было Code 3
-          touch sources.txt
+          touch sources.txt processed.json
           mkdir -p configs
-          # ЗАПУСК (убедись, что файл в репо называется parser.py)
+          # Запускаем и смотрим, что внутри
           python parser.py
 
       - name: Commit and push changes
