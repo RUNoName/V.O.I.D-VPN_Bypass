@@ -29,11 +29,11 @@ jobs:
       - name: Install Xray Core
         run: |
           curl -L "https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip" -o xray.zip
-          unzip -o xray.zip
+          # Распаковываем только нужные файлы, игнорируя README и LICENSE
+          unzip -o xray.zip xray geoip.dat geosite.dat
           chmod +x xray
-          # Копируем в систему, а в текущей папке он и так уже лежит
           sudo cp xray /usr/local/bin/xray || true
-          echo "✅ Xray готов к работе"
+          echo "✅ Xray установлен без повреждения README"
 
       - name: Run V.O.I.D Parser
         run: |
