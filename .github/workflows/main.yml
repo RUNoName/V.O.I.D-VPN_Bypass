@@ -4,14 +4,14 @@ on:
   schedule:
     # Запуск каждые 55 минут
     - cron: '*/55 * * * *'
-  workflow_dispatch: # Позволяет запускать вручную для теста
+  workflow_dispatch: # Кнопка для ручного запуска
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write
+      contents: write # Даем права на запись изменений в репозиторий
 
     steps:
       - name: Checkout code
@@ -24,22 +24,26 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests aiohttp aiofiles
+          python -m pip install --upgrade pip
+          # Устанавливаем всё, что было в твоих импортах + lxml для парсинга
+          pip install requests aiohttp aiofiles lxml
 
       - name: Install Xray Core
         run: |
-          # Скачиваем последнюю версию Xray для проверки конфигов
+          # Авто-подбор последней версии Xray под Linux 64-bit
           LATEST_URL=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep "browser_download_url.*Xray-linux-64.zip" | cut -d '"' -f 4)
           curl -L "$LATEST_URL" -o xray.zip
-          unzip xray.zip
+          unzip -o xray.zip
           chmod +x xray
-          # Переносим в PATH, чтобы скрипт видел команду 'xray'
+          # Закидываем в PATH, чтобы python видел команду 'xray'
           sudo mv xray /usr/local/bin/
+          xray -version # Проверка, что встало ровно
 
       - name: Run V.O.I.D Parser
         run: |
-          # Создаем папки, если их нет, чтобы скрипт не вылетал
+          # Создаем папку для конфигов, если скрипт её ожидает
           mkdir -p configs
+          # Запуск твоего переименованного файла
           python parser.py
 
       - name: Commit and push changes
@@ -47,6 +51,6 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .
-          # Коммитим только если файлы реально изменились
+          # Коммитим только если файлы реально изменились, чтобы не плодить пустые ошибки
           git commit -m "🌑 VOID: Эфир обновлен $(date +'%Y-%m-%d %H:%M')" || echo "Изменений не обнаружено"
           git push
