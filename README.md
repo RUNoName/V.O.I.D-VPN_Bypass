@@ -1,7 +1,7 @@
 # V.O.I.D Bypass
 
 <p align="center">
-  <img src="https://i.pinimg.com/736x/f8/d0/8e/f8d08edf23d25758d48d3a9dad363840.jpg" width="850">
+  <img src="https://i.pinimg.com/736x/51/95/43/5195437d0e51d5dda8cdabf92fb308ec.jpg" width="850">
 </p>
 
 Теперь свиток полностью очищен от всех внешних связей, порталов и упоминаний тайных каналов связи. Осталась только чистая суть твоего проекта в суровом стиле VOID.
