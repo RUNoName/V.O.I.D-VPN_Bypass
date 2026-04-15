@@ -20,7 +20,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ========= ДИАГНОСТИКА =========
-print(f"🚀 Запуск парсера...")
+print(f"🚀 Запуск мультиканального парсера [V.O.I.D]...")
 print(f"📂 Текущая директория: {os.getcwd()}")
 print(f"🐍 Python версия: {sys.version}")
 
@@ -54,8 +54,9 @@ print(f"⚡ Настройки: XRAY_MAX_WORKERS={XRAY_MAX_WORKERS}, TIMEOUT={XR
 
 cycle_counter = 0
 
-# ========= РЕГУЛЯРКИ =========
-VLESS_REGEX = re.compile(r"vless://[0-9a-fA-F\-]{36}@[^\s\"'<]+", re.IGNORECASE)
+# ========= РЕГУЛЯРКИ (ОБНОВЛЕНО: VLESS, TROJAN, HY2) =========
+# Используем не захватывающую группу для протоколов
+CONFIG_REGEX = re.compile(r"(?:vless|trojan|hysteria2|hy2)://[^\s\"'<]+", re.IGNORECASE)
 UUID_REGEX = re.compile(
     r"[0-9a-fA-F]{8}-"
     r"[0-9a-fA-F]{4}-"
@@ -64,7 +65,7 @@ UUID_REGEX = re.compile(
     r"[0-9a-fA-F]{12}"
 )
 
-# ========= СЛОВАРЬ ДОМЕНОВ =========
+# ========= СЛОВАРЬ ДОМЕНОВ (RU-SEGMENT) =========
 DOMAIN_NAMES = {
     'x5.ru': 'Пятёрочка', '5ka.ru': 'Пятёрочка', '5ka-cdn.ru': 'Пятёрочка',
     '5ka.static.ru': 'Пятёрочка', 'ads.x5.ru': 'Пятёрочка', 'perekrestok.ru': 'Перекрёсток',
@@ -242,12 +243,18 @@ def log_xray_error(message: str):
     except:
         pass
 
-# ========= ВАЛИДАЦИЯ =========
-def validate_vless(url: str) -> bool:
-    if not url.startswith("vless://"): return False
-    if not UUID_REGEX.search(url): return False
-    if "@" not in url or ":" not in url: return False
-    return True
+# ========= ВАЛИДАЦИЯ (ОБНОВЛЕНО) =========
+def validate_config(url: str) -> bool:
+    """Проверяет валидность конфига для VLESS, Trojan, Hy2."""
+    try:
+        if url.startswith("vless://"):
+            return bool(UUID_REGEX.search(url)) and "@" in url and ":" in url
+        if url.startswith(("trojan://", "hysteria2://", "hy2://")):
+            # Для трояна и гистерии формат может отличаться от UUID, проверяем наличие структуры
+            return "@" in url and ":" in url
+        return False
+    except:
+        return False
 
 # ========= WHITELIST =========
 def load_whitelist_domains():
@@ -266,10 +273,15 @@ def load_whitelist_domains():
             print("⚠️ Ошибка загрузки whitelist.txt")
     return domains, suffixes
 
-# ========= ПРОТОКОЛ / SNI / НАЗВАНИЕ =========
-def detect_protocol(vless_url: str) -> str:
+# ========= ПРОТОКОЛ / SNI / НАЗВАНИЕ (ОБНОВЛЕНО) =========
+def detect_protocol(url: str) -> str:
     try:
-        no_scheme = vless_url[len("vless://"):]
+        if url.startswith("hysteria2://") or url.startswith("hy2://"):
+            return "Hy2"
+        if url.startswith("trojan://"):
+            return "Trojan"
+            
+        no_scheme = url.split("://", 1)[1]
         after_at = no_scheme.split("@", 1)[1]
         query = after_at.split("?", 1)[1] if "?" in after_at else ""
         params = dict(urllib.parse.parse_qsl(query))
@@ -284,15 +296,17 @@ def detect_protocol(vless_url: str) -> str:
         if transport == "tcp": return "TCP"
         if security == "reality": return "Reality"
         if security in ("tls", "xtls"): return "TLS"
-        return "TCP"
+        return "VLESS"
     except:
-        return "Неизвестно"
+        return "VPN"
 
-def extract_all_possible_domains(vless_url: str) -> list:
+def extract_all_possible_domains(url: str) -> list:
     domains = set()
     try:
-        if not vless_url.startswith("vless://"): return []
-        content = vless_url[8:]
+        parts = url.split("://", 1)
+        if len(parts) < 2: return []
+        
+        content = parts[1]
         at_pos = content.find('@')
         if at_pos == -1: return []
         
@@ -314,7 +328,8 @@ def extract_all_possible_domains(vless_url: str) -> list:
             if '#' in query_part: query_part = query_part.split('#', 1)[0]
             params = dict(urllib.parse.parse_qsl(query_part))
             
-            for k in ['sni', 'host']:
+            # Стандартные ключи для SNI и Host
+            for k in ['sni', 'host', 'peer']:
                 if k in params and '.' in params[k]:
                     domains.add(params[k].lower())
                     
@@ -342,8 +357,8 @@ def get_human_name(domain: str) -> str:
         
     return "Неизвестно"
 
-def filter_by_sni(vless_url: str, whitelist_domains: set, whitelist_suffixes: list) -> bool:
-    domains = extract_all_possible_domains(vless_url)
+def filter_by_sni(url: str, whitelist_domains: set, whitelist_suffixes: list) -> bool:
+    domains = extract_all_possible_domains(url)
     
     if whitelist_domains:
         for domain in domains:
@@ -378,7 +393,7 @@ async def process_url(session, url, sem, output_queue, stats_lock, stats):
         stats["processed"] += 1
 
     if content:
-        matches = VLESS_REGEX.findall(content)
+        matches = CONFIG_REGEX.findall(content)
         if matches:
             async with stats_lock:
                 stats["found"] += len(matches)
@@ -386,20 +401,19 @@ async def process_url(session, url, sem, output_queue, stats_lock, stats):
                 await output_queue.put(match)
 
     async with stats_lock:
-        print(f"Обработано: {stats['processed']} | Найдено VLESS: {stats['found']}", end="\r")
+        print(f"Обработано: {stats['processed']} | Найдено конфигов: {stats['found']}", end="\r")
 
 async def writer_task(output_queue, output_file):
-    """Асинхронно пишет строки из очереди в файл."""
     async with aiofiles.open(output_file, "w", encoding="utf-8") as f:
         while True:
             line = await output_queue.get()
-            if line is None:  # сигнал завершения
+            if line is None:
                 break
             await f.write(line + "\n")
             output_queue.task_done()
 
 # ========= ОЧИСТКА =========
-async def clean_vless():
+async def clean_configs():
     print("\nОчищаю дубликаты и проверяю валидность...")
     if not os.path.exists(OUTPUT_FILE): return
 
@@ -409,7 +423,7 @@ async def clean_vless():
     except:
         return
 
-    unique_valid = {url.strip() for url in lines if url.strip() and validate_vless(url.strip())}
+    unique_valid = {url.strip() for url in lines if url.strip() and validate_config(url.strip())}
 
     async with aiofiles.open(CLEAN_FILE, "w", encoding="utf-8") as f:
         await f.write("\n".join(unique_valid) + "\n")
@@ -417,8 +431,8 @@ async def clean_vless():
     print(f"Очистка завершена. Итоговых конфигов: {len(unique_valid)}")
 
 # ========= ФИЛЬТРАЦИЯ ПО WHITELIST =========
-async def filter_vless():
-    print("\n=== Фильтрация по whitelist ===")
+async def filter_configs():
+    print("\n=== Фильтрация по whitelist (V.O.I.D) ===")
     if not os.path.exists(CLEAN_FILE): return
 
     domains, suffixes = load_whitelist_domains()
@@ -446,7 +460,7 @@ async def filter_vless():
 
     print(f"\nФильтрация завершена. Итог: {passed} конфигов.")
 
-# ========= ПЕРЕИМЕНОВАНИЕ =========
+# ========= ПЕРЕИМЕНОВАНИЕ (ОБНОВЛЕНО) =========
 async def rename_configs():
     print("\n=== Переименование конфигов по протоколу и SNI ===")
     if not os.path.exists(FILTERED_FILE): return
@@ -490,17 +504,19 @@ async def rename_configs():
 
     print(f"\nПереименование завершено. Итог: {processed} конфигов.")
 
-# ========= НОРМАЛИЗАЦИЯ И КОДИРОВАНИЕ URL =========
-def encode_vless_url(url: str) -> str:
-    """Корректное кодирование VLESS URL, сохраняя уже закодированные символы."""
+# ========= НОРМАЛИЗАЦИЯ URL (ОБНОВЛЕНО) =========
+def encode_config_url(url: str) -> str:
+    """Корректное кодирование URL для всех типов протоколов."""
     try:
-        if not url.startswith("vless://"): return url
+        schemes = ("vless://", "trojan://", "hysteria2://", "hy2://")
+        current_scheme = next((s for s in schemes if url.startswith(s)), None)
+        if not current_scheme: return url
         
-        content = url[8:]
+        content = url[len(current_scheme):]
         at_pos = content.find('@')
         if at_pos == -1: return url
         
-        uuid = content[:at_pos]
+        auth = content[:at_pos]
         after_at = content[at_pos+1:]
         
         q_pos = after_at.find('?')
@@ -526,28 +542,24 @@ def encode_vless_url(url: str) -> str:
                 fragment = params_part[hash_pos+1:]
                 params_part = params_only
         
-        # Парсим параметры с сохранением оригинального кодирования
         params = dict(urllib.parse.parse_qsl(params_part, keep_blank_values=True))
         encoded_params = []
         for k, v in params.items():
-            if k in ['security', 'type', 'fp', 'pbk', 'sid', 'flow']:
+            if k in ['security', 'type', 'fp', 'pbk', 'sid', 'flow', 'mode']:
                 encoded_params.append(f"{k}={v}")
             else:
-                # Кодируем значение, но оставляем уже закодированные %XX
-                # Для простоты используем quote с safe='%'
                 encoded_v = urllib.parse.quote(v, safe='%')
                 encoded_params.append(f"{k}={encoded_v}")
         
         new_params = "&".join(encoded_params)
         
-        # Фрагмент кодируем только если есть не-ASCII символы
         try:
             fragment.encode('ascii')
             encoded_fragment = fragment
         except UnicodeEncodeError:
             encoded_fragment = urllib.parse.quote(fragment, safe='')
         
-        base = f"vless://{uuid}@{host_only}"
+        base = f"{current_scheme}{auth}@{host_only}"
         if new_params: base += f"?{new_params}"
         if encoded_fragment: base += f"#{encoded_fragment}"
         
@@ -571,7 +583,7 @@ async def encode_all_configs():
     
     async with aiofiles.open(ENCODED_FILE, "w", encoding="utf-8") as f_out:
         for i, url in enumerate(configs, 1):
-            encoded_url = encode_vless_url(url)
+            encoded_url = encode_config_url(url)
             await f_out.write(encoded_url + "\n")
             if encoded_url != url: changed += 1
             if i % 500 == 0:
@@ -579,7 +591,7 @@ async def encode_all_configs():
     
     print(f"\nКодирование завершено. Всего: {total}, изменено: {changed}")
 
-# ========= АЛЬТЕРНАТИВНЫЕ МЕТОДЫ ПРОВЕРКИ =========
+# ========= ТЕСТОВЫЕ МЕТОДЫ =========
 def check_tcp_connection(host: str, port: int, timeout: int = 2) -> bool:
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -609,7 +621,7 @@ def check_tls_handshake(host: str, port: int = 443, sni: str = None, timeout: in
     except Exception as e:
         return (False, None, str(e))
 
-# ========= XRAY-ТЕСТЕР =========
+# ========= XRAY-ТЕСТЕР (ОБНОВЛЕНО) =========
 class SimpleProgress:
     def __init__(self, total):
         self.total = total
@@ -627,11 +639,11 @@ class SimpleProgress:
             if self.current % 10 == 0 or self.current == self.total:
                 elapsed = time.time() - self.start_time
                 speed = self.current / elapsed if elapsed > 0 else 0
-                print(f"\r📊 [{self.current}/{self.total}] ✅:{self.working_count} 🔄:{self.retry_count} {speed:.1f} к/с {status}", end='', flush=True)
+                print(f"\r📊 [V.O.I.D][{self.current}/{self.total}] ✅:{self.working_count} 🔄:{self.retry_count} {speed:.1f} к/с {status}", end='', flush=True)
     
     def finish(self):
         elapsed = time.time() - self.start_time
-        print(f"\r✅ Готово! {self.current} конфигов за {elapsed:.1f}с ({self.current/elapsed:.1f} к/с), рабочих: {self.working_count}, повторов: {self.retry_count}")
+        print(f"\r✅ Готово! {self.current} конфигов за {elapsed:.1f}с ({self.current/elapsed:.1f} к/с), рабочих: {self.working_count}")
 
 class PortManager:
     def __init__(self, start=20000, end=25000):
@@ -665,36 +677,27 @@ class XrayTester:
         self.port_manager = PortManager()
         self.debug_file = DEBUG_FILE
         self.xray_log_file = XRAY_LOG_FILE
-        
-        print(f"🔍 XrayTester инициализирован")
-        # Синхронная проверка наличия Xray при инициализации (вызывается из executor)
         self._ensure_xray()
 
     def _ensure_xray(self):
-        """Проверяет наличие Xray и скачивает при необходимости."""
         if not self.xray_path.exists():
             print("⬇️ Скачиваю Xray...")
             self._download_xray()
         else:
             try:
                 result = subprocess.run([str(self.xray_path), '-version'], capture_output=True, text=True, timeout=5)
-                version = result.stdout.split('\n')[0] if result.stdout else 'Unknown'
-                print(f"✅ Xray готов: {version}")
-            except Exception as e:
-                print(f"⚠️ Ошибка версии Xray: {e}, пробую переустановить")
+                print(f"✅ Xray ядро готово")
+            except:
                 self._download_xray()
 
     def _download_xray(self):
-        """Загружает Xray с официального репозитория."""
         import urllib.request, zipfile, platform
         self.xray_dir.mkdir(exist_ok=True)
         system = platform.system().lower()
         if system == 'windows':
             url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip"
-        elif system == 'linux':
-            url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
         else:
-            raise RuntimeError(f"Unsupported OS: {system}")
+            url = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip"
         
         zip_path = self.xray_dir / "xray.zip"
         try:
@@ -702,181 +705,137 @@ class XrayTester:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(self.xray_dir)
             zip_path.unlink()
-            # Устанавливаем права на исполнение для Linux/Mac
-            if os.name != 'nt':
-                os.chmod(self.xray_path, 0o755)
-            print("✅ Xray загружен")
+            if os.name != 'nt': os.chmod(self.xray_path, 0o755)
         except Exception as e:
             print(f"❌ Ошибка загрузки Xray: {e}")
 
-    def parse_vless_url(self, url):
+    def parse_url(self, url):
         try:
-            if not url.startswith('vless://'): return None
-            content = url[8:]
+            schemes = ("vless://", "trojan://", "hysteria2://", "hy2://")
+            scheme = next((s for s in schemes if url.startswith(s)), None)
+            if not scheme: return None
+            
+            content = url[len(scheme):]
             at_pos = content.find('@')
             if at_pos == -1: return None
             
-            uuid = content[:at_pos]
+            auth = content[:at_pos]
             after_at = content[at_pos+1:]
             
             q_pos = after_at.find('?')
-            if q_pos != -1:
-                host_part = after_at[:q_pos]
-                query = after_at[q_pos+1:]
-            else:
-                host_part = after_at
-                query = ""
+            host_part = after_at[:q_pos] if q_pos != -1 else after_at
+            query = after_at[q_pos+1:] if q_pos != -1 else ""
             
             host_part = host_part.split('#')[0]
             host, port = (host_part.split(':', 1) + [443])[:2]
             
-            params = dict(urllib.parse.parse_qsl(query))
-            return {'uuid': uuid, 'host': host, 'port': int(port), 'params': params, 'url': url}
-        except Exception:
-            return None
+            return {
+                'scheme': scheme.replace("://", ""), 
+                'auth': auth, 'host': host, 
+                'port': int(port), 
+                'params': dict(urllib.parse.parse_qsl(query)), 
+                'url': url
+            }
+        except: return None
 
     def create_xray_config(self, parsed, port):
         try:
-            params = parsed['params']
-            flow = params.get('flow', '')
-            security = params.get('security', '')
+            p = parsed['params']
+            protocol = parsed['scheme']
+            if protocol == "hy2": protocol = "hysteria2"
             
+            outbound = {
+                "protocol": protocol,
+                "settings": {},
+                "streamSettings": {
+                    "network": p.get('type', 'tcp'),
+                    "security": p.get('security', 'none')
+                },
+                "tag": "proxy"
+            }
+
+            if protocol == "vless":
+                outbound["settings"] = {"vnext": [{"address": parsed['host'], "port": parsed['port'], "users": [{"id": parsed['auth'], "encryption": "none", "flow": p.get('flow', '')}]}]}
+            elif protocol == "trojan":
+                outbound["settings"] = {"servers": [{"address": parsed['host'], "port": parsed['port'], "password": parsed['auth']}]}
+            elif protocol == "hysteria2":
+                outbound["settings"] = {"servers": [{"address": parsed['host'], "port": parsed['port'], "password": parsed['auth']}]}
+                outbound["streamSettings"]["network"] = "udp"
+
+            # Reality / TLS
+            if p.get('security') == 'reality':
+                outbound["streamSettings"]["realitySettings"] = {
+                    "serverName": p.get('sni', parsed['host']), "fingerprint": p.get('fp', 'chrome'),
+                    "publicKey": p.get('pbk', ''), "shortId": p.get('sid', ''), "spiderX": p.get('spx', '/')
+                }
+            elif p.get('security') == 'tls':
+                outbound["streamSettings"]["tlsSettings"] = {"serverName": p.get('sni', parsed['host']), "allowInsecure": True}
+
             config = {
                 "log": {"loglevel": "error"},
-                "inbounds": [{"port": port, "protocol": "socks", "settings": {"auth": "noauth", "udp": False}, "tag": "socks-in"}],
-                "outbounds": [{
-                    "protocol": "vless",
-                    "settings": {"vnext": [{"address": parsed['host'], "port": parsed['port'], "users": [{"id": parsed['uuid'], "encryption": "none", "flow": flow}]}]},
-                    "streamSettings": {"network": params.get('type', 'tcp'), "security": security},
-                    "tag": "proxy"
-                }]
+                "inbounds": [{"port": port, "protocol": "socks", "settings": {"auth": "noauth", "udp": False}}],
+                "outbounds": [outbound]
             }
-            
-            if security == 'reality':
-                config["outbounds"][0]["streamSettings"]["realitySettings"] = {
-                    "serverName": params.get('sni', parsed['host']), "fingerprint": params.get('fp', 'chrome'),
-                    "publicKey": params.get('pbk', ''), "shortId": params.get('sid', ''), "spiderX": params.get('spx', '/')
-                }
-            elif security == 'tls':
-                config["outbounds"][0]["streamSettings"]["tlsSettings"] = {"serverName": params.get('sni', parsed['host']), "allowInsecure": True}
-            
-            if params.get('type') in ('ws', 'websocket'):
-                config["outbounds"][0]["streamSettings"]["wsSettings"] = {"path": params.get('path', '/'), "headers": {"Host": params.get('host', params.get('sni', parsed['host']))}}
-            
-            if params.get('type') in ('grpc', 'gun'):
-                config["outbounds"][0]["streamSettings"]["grpcSettings"] = {"serviceName": params.get('servicename', params.get('service', '')), "multiMode": True}
-            
             return config
-        except Exception:
-            return None
+        except: return None
 
-    def _read_stderr(self, process):
-        """Читает stderr процесса, чтобы избежать блокировки."""
-        try:
-            for line in process.stderr:
-                pass  # игнорируем
-        except:
-            pass
-
-    def test_with_xray(self, parsed, port, attempt=1):
+    def test_with_xray(self, parsed, port):
         config_file, process = None, None
         try:
             config = self.create_xray_config(parsed, port)
-            if not config: return None
+            if not config: return "FAIL"
             
             fd, config_file = tempfile.mkstemp(suffix='.json')
             os.close(fd)
             with open(config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f)
             
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-            process = subprocess.Popen(
-                [str(self.xray_path), '-c', config_file],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                creationflags=creationflags
-            )
-            # Запускаем поток для чтения stderr
-            stderr_thread = threading.Thread(target=self._read_stderr, args=(process,), daemon=True)
-            stderr_thread.start()
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            process = subprocess.Popen([str(self.xray_path), '-c', config_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
             
-            time.sleep(1.0)
-            if process.poll() is not None:
-                return "CRASH"
+            time.sleep(1.2)
+            if process.poll() is not None: return "CRASH"
             
             start = time.time()
-            session = requests.Session()
-            session.proxies = {'https': f'socks5://127.0.0.1:{port}'}
-            
             try:
-                r = session.get(self.test_url, timeout=self.timeout)
+                r = requests.get(self.test_url, proxies={'https': f'socks5://127.0.0.1:{port}'}, timeout=self.timeout)
                 if r.status_code in [200, 204]:
-                    return {'working': True, 'ping': (time.time() - start) * 1000, 'method': 'xray'}
-                return "FAIL"
-            except requests.exceptions.Timeout: return "TIMEOUT"
-            except requests.exceptions.ConnectionError: return "CONN_ERROR"
-            except Exception: return "ERROR"
-            
-        except Exception:
-            return "EXCEPTION"
+                    return {'working': True, 'ping': (time.time() - start) * 1000}
+            except: pass
+            return "FAIL"
         finally:
             if process:
                 try: 
                     process.terminate()
-                    process.wait(timeout=2.0)
-                except: 
-                    process.kill()
+                    process.wait(timeout=1)
+                except: pass
             if config_file and os.path.exists(config_file):
                 try: os.remove(config_file)
                 except: pass
 
-    def check_alternative_methods(self, parsed, url):
-        host, port = parsed['host'], parsed['port']
-        params = parsed['params']
-        if not check_tcp_connection(host, port, timeout=2): return None
-        
-        security = params.get('security', '')
-        if security in ['reality', 'tls']:
-            tls_ok, _, _ = check_tls_handshake(host, port, params.get('sni', host), timeout=2)
-            if tls_ok:
-                return {'url': url, 'ping': 100, 'method': 'tls_check', 'security': security}
-        return None
-
     def test_one(self, url):
-        parsed = self.parse_vless_url(url)
+        parsed = self.parse_url(url)
         if not parsed: return None
         
         port = self.port_manager.get_port()
-        if port:
-            try:
-                for attempt in range(1, self.max_retries + 1):
-                    result = self.test_with_xray(parsed, port, attempt)
-                    if isinstance(result, dict) and result.get('working'):
-                        self.port_manager.release_port(port)
-                        return {'url': url, 'ping': result['ping'], 'method': 'xray'}
-                    if result in ["TIMEOUT", "FAIL", "CONN_ERROR", "CRASH"] and attempt < self.max_retries:
-                        time.sleep(self.retry_delay)
-                        continue
-                    break
-            finally:
-                self.port_manager.release_port(port)
+        if not port: return None
         
-        return self.check_alternative_methods(parsed, url)
+        try:
+            for _ in range(self.max_retries):
+                res = self.test_with_xray(parsed, port)
+                if isinstance(res, dict): return {'url': url, 'ping': res['ping']}
+                time.sleep(self.retry_delay)
+        finally:
+            self.port_manager.release_port(port)
+        return None
 
     def test_all(self):
         if not os.path.exists(self.input_file): return
-        
-        try:
-            with open(self.input_file, 'r', encoding='utf-8') as f:
-                all_urls = [line.strip() for line in f if line.strip()]
-        except:
-            return
+        with open(self.input_file, 'r', encoding='utf-8') as f:
+            all_urls = [line.strip() for line in f if line.strip()]
         
         if not all_urls: return
-        
-        print(f"\n🔍 Тестирование {len(all_urls)} конфигов")
-        if os.path.exists(self.debug_file): os.remove(self.debug_file)
+        print(f"\n🔍 Тестирование {len(all_urls)} конфигов (VLESS/Trojan/Hy2)")
         
         working = []
         progress = SimpleProgress(len(all_urls))
@@ -884,25 +843,20 @@ class XrayTester:
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(self.test_one, url): url for url in all_urls}
             for future in as_completed(futures):
-                try:
-                    result = future.result(timeout=self.timeout + 5)
-                    if result:
-                        working.append(result)
-                        progress.update('✅', working=True)
-                    else:
-                        progress.update('❌', working=False)
-                except Exception:
-                    progress.update('⚠️', working=False)
+                res = future.result()
+                if res:
+                    working.append(res)
+                    progress.update('✅', working=True)
+                else:
+                    progress.update('❌')
         
         progress.finish()
         working.sort(key=lambda x: x['ping'])
         
         with open(self.output_file, 'w', encoding='utf-8') as f:
-            for w in working:
-                f.write(w['url'] + '\n')
+            for w in working: f.write(w['url'] + '\n')
         
-        print(f"\n📊 Результаты: ✅ Рабочих: {len(working)} | ❌ Не рабочих: {len(all_urls)-len(working)}\n")
-        return working
+        print(f"📊 Результаты: ✅ Рабочих: {len(working)}\n")
 
     def run(self):
         self.test_all()
@@ -911,72 +865,60 @@ class XrayTester:
 async def main_cycle():
     global cycle_counter
     cycle_counter += 1
-    print(f"\n=== Новый цикл #{cycle_counter} ===")
-    
-    if cycle_counter % CYCLES_BEFORE_DEBUG_CLEAN == 0 and os.path.exists(DEBUG_FILE):
-        os.remove(DEBUG_FILE)
+    print(f"\n=== Новый цикл #{cycle_counter} [V.O.I.D Project] ===")
     
     if os.path.exists(OUTPUT_FILE): os.remove(OUTPUT_FILE)
-    if not os.path.exists(SOURCES_FILE): return
-
-    try:
-        with open(SOURCES_FILE, "r", encoding="utf-8", errors="ignore") as f:
-            urls = [line.strip() for line in f if line.strip()]
-    except:
+    if not os.path.exists(SOURCES_FILE): 
+        print(f"❌ Файл {SOURCES_FILE} не найден!")
         return
 
+    try:
+        with open(SOURCES_FILE, "r", encoding="utf-8") as f:
+            urls = [line.strip() for line in f if line.strip()]
+    except: return
+
     if not urls: return
-    print(f"📥 Загружаю {len(urls)} источников...")
     
     sem = asyncio.Semaphore(THREADS_DOWNLOAD)
     output_queue = asyncio.Queue()
     stats = {"processed": 0, "found": 0}
     stats_lock = asyncio.Lock()
     
-    # Запускаем писатель в фоне
     writer = asyncio.create_task(writer_task(output_queue, OUTPUT_FILE))
     
     async with aiohttp.ClientSession() as session:
         tasks = [process_url(session, url, sem, output_queue, stats_lock, stats) for url in urls]
         await asyncio.gather(*tasks)
     
-    # Сигнализируем писателю о завершении
     await output_queue.put(None)
     await writer
 
-    print(f"\n✅ Скачивание завершено. Найдено VLESS: {stats['found']}")
-    await log(f"Скачивание завершено. Найдено VLESS: {stats['found']}")
-
     if stats['found'] > 0:
-        await clean_vless()
-        await filter_vless()
+        await clean_configs()
+        await filter_configs()
         await rename_configs()
         await encode_all_configs()
 
         print("\n=== Запуск Xray-проверки ===")
         tester = XrayTester(input_file=ENCODED_FILE, output_file=WORK_FILE, max_workers=XRAY_MAX_WORKERS)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, tester.run)
+        await asyncio.get_event_loop().run_in_executor(None, tester.run)
     else:
-        print("⏭️ Нет новых конфигов для обработки")
+        print("⏭️ Новых конфигов не обнаружено")
 
 async def run_forever():
-    print("\n🔄 Запуск бесконечного цикла...")
     while True:
         try:
-            cycle_start = time.time()
             await main_cycle()
-            print(f"✅ Цикл завершен за {time.time() - cycle_start:.1f}с")
+            print(f"📡 Ожидание следующего цикла ({CYCLE_DELAY}с)...")
             await asyncio.sleep(CYCLE_DELAY)
-        except KeyboardInterrupt:
-            break
+        except KeyboardInterrupt: break
         except Exception as e:
-            print(f"⚠️ Критическая ошибка в цикле: {e}")
-            await log(f"Критическая ошибка: {e}")
+            print(f"⚠️ Ошибка: {e}")
             await asyncio.sleep(60)
 
 if __name__ == "__main__":
     try:
+        # Для первого запуска выполняем один цикл, либо run_forever() для сервера
         asyncio.run(main_cycle())
     except KeyboardInterrupt:
-        print("\n👋 Программа остановлена")
+        print("\n👋 Парсер остановлен пользователем")
