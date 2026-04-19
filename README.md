@@ -11,7 +11,7 @@
 🌟 Вознеси звезду над этим манускриптом, чтобы свет его коснулся каждого заблудшего путника в тумане.
 📜 ОБРЯД ОТРЕЧЕНИЯ (Важная информация)
 
-Ссылка для получения силы проекта - https://raw.githubusercontent.com/RUNoName/V.O.I.D-VPN_Bypass/refs/heads/main/configs/url_work.txt
+Ссылка для получения силы проекта - https://raw.githubusercontent.com/VOID-Anonymity/V.O.I.D-VPN_Bypass/refs/heads/main/url_work.txt
 
 Свиток уходит в поход за шкурами каждые 55 минут
 
